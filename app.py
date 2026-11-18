@@ -409,7 +409,7 @@ with tabs[1]:
     """)
     
     sim_df = pd.DataFrame(sim_matrix, index=df_menu["nama"], columns=df_menu["nama"])
-    st.dataframe(sim_df.style.background_gradient(cmap="Blues", axis=None).format("{:.2f}"), use_container_width=True)
+    st.dataframe(sim_df.round(2), use_container_width=True)
     
     st.subheader(f"📈 Grafik Tingkat Kemiripan terhadap: {target_menu}")
     target_idx = df_menu[df_menu["nama"] == target_menu].index[0]
