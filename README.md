@@ -1,17 +1,21 @@
-# Pringmoni - Sistem Rekomendasi Menu Restoran (Market Basket Analysis)
+# Pringmoni - Content-Based Menu Recommender System
 
-Aplikasi web sistem rekomendasi berbasis **Streamlit** untuk studi kasus pemesanan menu **Restoran Pringsewu** (PBL Proyek Pringmoni).
+Aplikasi web sistem rekomendasi berbasis **Streamlit** untuk studi kasus menu **Restoran Pringsewu** (PBL Pringmoni).
 
-## 🚀 Fitur Utama
-1. **Simulasi Self-Order Interaktif**: Pelanggan memilih menu makanan, sistem langsung menyarankan menu pendamping (*Recommended Add-ons*) seperti minuman, sambal, atau hidangan pelengkap yang relevan.
-2. **Analisis Algoritma Asosiasi (Apriori / Association Rule Mining)**: Menampilkan metrik *Support*, *Confidence*, dan *Lift Ratio* untuk setiap pola keterikatan menu.
-3. **Visualisasi Data Interaktif**: Grafik frekuensi pemesanan menu terlaris dan grafik asosiasi menu terkuat.
-4. **Parameter Dinamis**: Slider interaktif untuk menyesuaikan ambang batas *minimum confidence* dan *minimum support*.
+## 🚀 Metode Rekomendasi
+Sistem ini menggunakan metode **Content-Based Filtering (CBF)** dengan algoritma:
+- **TF-IDF (Term Frequency - Inverse Document Frequency)** untuk ekstraksi fitur teks konten menu (kategori, rasa, bahan baku, cara memasak, suhu saji, dan deskripsi).
+- **Cosine Similarity** untuk mengukur derajat kemiripan antar-menu secara matematis ($0.0$ s/d $1.0$).
+
+## ✨ Fitur Utama
+1. **Rekomendasi Menu Serupa (Top-K)**: Pelanggan memilih menu acuan, sistem langsung merekomendasikan hidangan alternatif yang memiliki profil rasa dan bahan baku serupa beserta persentase kemiripannya.
+2. **Matriks Cosine Similarity & Heatmap**: Visualisasi tabel derajat kemiripan antar semua menu dan diagram batang Top-8 menu paling mirip.
+3. **Eksplorasi Profil Menu**: Melihat rincian fitur konten (*Item Profile*) dan perbendaharaan kata (*vocabulary*).
+4. **Kontrol Interaktif**: Slider untuk mengatur jumlah rekomendasi (*Top-K*) dan ambang batas minimum kemiripan (*similarity threshold*).
 
 ## 🛠️ Menjalankan Secara Lokal
-
 ```bash
-# 1. Masuk ke folder proyek
+# 1. Pindah ke direktori
 cd sistem_rekomendasi_pringsewu
 
 # 2. Install dependensi
@@ -22,12 +26,6 @@ streamlit run app.py
 ```
 
 ## 🌐 Deploy ke Publik (Streamlit Community Cloud)
-
-1. Buat repository baru di GitHub (misal: `rekomendasi-menu-pringmoni`).
-2. Upload file:
-   - `app.py`
-   - `requirements.txt`
-   - `README.md`
-3. Buka [share.streamlit.io](https://share.streamlit.io/) dan login dengan GitHub.
-4. Klik **New app**, pilih repository dan branch Anda, arahkan main file path ke `app.py`, lalu klik **Deploy!**.
-5. Link publik langsung aktif dan siap dicantumkan dalam laporan.
+1. Buka repositori GitHub Anda: `maspannnpgr/rekomendasi-menu-pringmoni`
+2. Perbarui file `app.py`, `README.md`, dan `requirements.txt`
+3. Aplikasi di [share.streamlit.io](https://share.streamlit.io/) akan otomatis ter-update dan siap diakses publik!

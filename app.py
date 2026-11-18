@@ -1,13 +1,16 @@
 # Streamlit App - Sistem Rekomendasi Menu Restoran Pringsewu (Pringmoni)
+# Metode: Content-Based Filtering (CBF) menggunakan TF-IDF & Cosine Similarity
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-import itertools
+import re
+import math
 from collections import Counter
 
 # Set konfigurasi halaman
 st.set_page_config(
-    page_title="Pringmoni - Sistem Rekomendasi Menu",
+    page_title="Pringmoni - Content-Based Recommendation",
     page_icon="🍽️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -27,12 +30,6 @@ st.markdown("""
         color: #4B5563;
         margin-bottom: 1.5rem;
     }
-    .metric-card {
-        background-color: #F3F4F6;
-        border-radius: 10px;
-        padding: 15px;
-        border-left: 5px solid #2563EB;
-    }
     .rec-card {
         background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%);
         border: 1px solid #93C5FD;
@@ -50,277 +47,387 @@ st.markdown("""
         background-color: #2563EB;
         color: white;
     }
+    .badge-sim {
+        display: inline-block;
+        padding: 3px 8px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        border-radius: 6px;
+        background-color: #059669;
+        color: white;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # -------------------------------------------------------------
-# 1. DATABASE & DUMMY TRANSAKSI (STUDI KASUS RESTO PRINGSEWU)
+# 1. DATASET KATALOG MENU PRINGSEWU BESERTA ATRIBUT KONTEN
 # -------------------------------------------------------------
-MENU_DATABASE = {
-    "Ayam Bakar Madu Pringsewu": {"kategori": "Makanan Utama", "harga": 38000, "deskripsi": "Ayam bakar bumbu madu khas Pringsewu yang gurih manis."},
-    "Gurame Bakar Cobek": {"kategori": "Makanan Utama", "harga": 65000, "deskripsi": "Ikan gurame segar dibakar dengan sambal cobek pedas segar."},
-    "Nasi Timbel Komplit": {"kategori": "Makanan Utama", "harga": 42000, "deskripsi": "Nasi timbel dibungkus daun pisang dengan ayam goreng, tahu tempe, sayur asem."},
-    "Bebek Goreng Sambal Korek": {"kategori": "Makanan Utama", "harga": 45000, "deskripsi": "Bebek ungkep bumbu rempah garing dengan sambal korek pedas nampol."},
-    "Sop Buntut Spesial": {"kategori": "Sup & Sayur", "harga": 68000, "deskripsi": "Buntut sapi empuk dengan kuah rempah bening kaya rasa."},
-    "Sayur Asem Jakarta": {"kategori": "Sup & Sayur", "harga": 18000, "deskripsi": "Kuah sayur asem segar berpadu jagung, kacang tanah, dan melinjo."},
-    "Karedok Sayur Segar": {"kategori": "Sup & Sayur", "harga": 20000, "deskripsi": "Sayuran mentah segar disiram bumbu kacang gurih pedas khas Sunda."},
-    "Tumis Kangkung Terasi": {"kategori": "Sup & Sayur", "harga": 19000, "deskripsi": "Kangkung segar ditumis cepat dengan cabai dan terasi harum."},
-    "Tahu & Tempe Mendoan": {"kategori": "Camilan & Tambahan", "harga": 16000, "deskripsi": "Mendoan hangat renyah disajikan dengan sambal kecap rawit."},
-    "Sambal Terasi Dadak": {"kategori": "Camilan & Tambahan", "harga": 8000, "deskripsi": "Sambal terasi segar diulek mendadak pedas mantap."},
-    "Nasi Putih Pulen": {"kategori": "Makanan Utama", "harga": 7000, "deskripsi": "Nasi putih hangat berkualitas dari beras pulen pilihan."},
-    "Es Teh Manis Pringsewu": {"kategori": "Minuman", "harga": 8000, "deskripsi": "Teh racikan melati segar dingin khas resto keluarga."},
-    "Es Jeruk Kelapa Muda": {"kategori": "Minuman", "harga": 22000, "deskripsi": "Perpaduan perasan jeruk manis alami dan serutan kelapa muda murni."},
-    "Jus Alpukat Kocok": {"kategori": "Minuman", "harga": 25000, "deskripsi": "Alpukat mentega lembut dengan lelehan susu kental manis cokelat."},
-    "Wedang Jahe Rempah": {"kategori": "Minuman", "harga": 16000, "deskripsi": "Minuman hangat tradisional untuk menghangatkan badan."}
-}
+@st.cache_data
+def get_menu_dataset():
+    data = [
+        {
+            "id": 1,
+            "nama": "Ayam Bakar Madu Pringsewu",
+            "kategori": "Makanan Utama",
+            "harga": 38000,
+            "rasa": "Manis Gurih Harum",
+            "bahan_utama": "Ayam Rempah Madu",
+            "cara_masak": "Bakar Panggang",
+            "suhu_saji": "Hangat",
+            "deskripsi": "Ayam bakar bumbu madu khas Pringsewu dengan cita rasa manis legit, rempah meresap, dan aroma bakaran menggugah selera."
+        },
+        {
+            "id": 2,
+            "nama": "Ayam Goreng Lengkuas",
+            "kategori": "Makanan Utama",
+            "harga": 36000,
+            "rasa": "Gurih Asin Renyah",
+            "bahan_utama": "Ayam Rempah Lengkuas",
+            "cara_masak": "Goreng Kremes",
+            "suhu_saji": "Hangat",
+            "deskripsi": "Ayam goreng kampung empuk bertabur serundeng lengkuas gurih renyah dengan aroma rempah tradisional."
+        },
+        {
+            "id": 3,
+            "nama": "Gurame Bakar Cobek",
+            "kategori": "Makanan Utama",
+            "harga": 65000,
+            "rasa": "Pedas Manis Segar",
+            "bahan_utama": "Ikan Gurame Cabai Rawit Jeruk Limau",
+            "cara_masak": "Bakar Cobek",
+            "suhu_saji": "Hangat",
+            "deskripsi": "Ikan gurame segar dibakar empuk disiram sambal cobek pedas segar dengan perasan jeruk limau harum."
+        },
+        {
+            "id": 4,
+            "nama": "Gurame Goreng Terbang",
+            "kategori": "Makanan Utama",
+            "harga": 63000,
+            "rasa": "Gurih Renyah Crispy",
+            "bahan_utama": "Ikan Gurame Tepung Bumbu",
+            "cara_masak": "Goreng Crispy",
+            "suhu_saji": "Hangat",
+            "deskripsi": "Ikan gurame dibelah mekar digoreng garing renyah hingga ke tulang, disajikan dengan sambal kecap pedas."
+        },
+        {
+            "id": 5,
+            "nama": "Bebek Goreng Sambal Korek",
+            "kategori": "Makanan Utama",
+            "harga": 45000,
+            "rasa": "Gurih Pedas Nampol",
+            "bahan_utama": "Bebek Cabai Rawit Bawang",
+            "cara_masak": "Goreng Ungkep",
+            "suhu_saji": "Hangat",
+            "deskripsi": "Daging bebek empuk gurih berbumbu ungkep rempah disajikan bersama lumuran sambal korek ulek mentah pedas nampol."
+        },
+        {
+            "id": 6,
+            "nama": "Bebek Bakar Kecap Pedas",
+            "kategori": "Makanan Utama",
+            "harga": 46000,
+            "rasa": "Manis Pedas Gurih",
+            "bahan_utama": "Bebek Kecap Manis Cabai",
+            "cara_masak": "Bakar Panggang",
+            "suhu_saji": "Hangat",
+            "deskripsi": "Potongan bebek empuk dibakar aroma arang dengan olesan kecap manis dan cabai racikan pedas nikmat."
+        },
+        {
+            "id": 7,
+            "nama": "Nasi Timbel Komplit",
+            "kategori": "Makanan Utama",
+            "harga": 42000,
+            "rasa": "Gurih Manis Segar",
+            "bahan_utama": "Nasi Daun Pisang Ayam Tahu Tempe Sayur Asem",
+            "cara_masak": "Kukus Paket",
+            "suhu_saji": "Hangat",
+            "deskripsi": "Nasi timbel dibungkus daun pisang wangi komplit dengan ayam goreng, tahu tempe, lalapan, sambal, dan semangkuk sayur asem."
+        },
+        {
+            "id": 8,
+            "nama": "Sop Buntut Spesial",
+            "kategori": "Sup & Sayur",
+            "harga": 68000,
+            "rasa": "Gurih Segar Kaya Rempah Kuah",
+            "bahan_utama": "Daging Buntut Sapi Wortel Kentang Pala Kuah Kaldu",
+            "cara_masak": "Rebus Sup Kaldu",
+            "suhu_saji": "Panas Berkuah",
+            "deskripsi": "Potongan buntut sapi lembut dimasak perlahan dalam kuah kaldu rempah bening kaya pala dan cengkeh harum."
+        },
+        {
+            "id": 9,
+            "nama": "Sop Iga Sapi Kuah Asam",
+            "kategori": "Sup & Sayur",
+            "harga": 62000,
+            "rasa": "Asam Segar Gurih Pedas Kuah",
+            "bahan_utama": "Daging Iga Sapi Tomat Hijau Belimbing Wuluh Kuah Kaldu",
+            "cara_masak": "Rebus Sup Kaldu",
+            "suhu_saji": "Panas Berkuah",
+            "deskripsi": "Iga sapi berdaging tebal dalam kuah kaldu asam segar perpaduan tomat hijau dan belimbing wuluh."
+        },
+        {
+            "id": 10,
+            "nama": "Sayur Asem Jakarta",
+            "kategori": "Sup & Sayur",
+            "harga": 18000,
+            "rasa": "Asam Manis Gurih Segar Kuah",
+            "bahan_utama": "Jagung Manis Kacang Tanah Melinjo Labu Siam Asam Jawa Kuah",
+            "cara_masak": "Rebus Sup Sayur",
+            "suhu_saji": "Hangat Berkuah",
+            "deskripsi": "Kuah sayur asem khas dengan paduan asam jawa segar, jagung manis pipil, melinjo, dan kacang tanah gurih."
+        },
+        {
+            "id": 11,
+            "nama": "Tumis Kangkung Terasi",
+            "kategori": "Sup & Sayur",
+            "harga": 19000,
+            "rasa": "Gurih Asin Pedas Harum",
+            "bahan_utama": "Kangkung Cabai Merah Terasi Udang Bawang",
+            "cara_masak": "Tumis Cah",
+            "suhu_saji": "Hangat",
+            "deskripsi": "Kangkung segar dimasak tumis cepat dengan cabai dan terasi udang harum khas cita rasa nusantara."
+        },
+        {
+            "id": 12,
+            "nama": "Tahu & Tempe Mendoan",
+            "kategori": "Camilan & Tambahan",
+            "harga": 16000,
+            "rasa": "Gurih Asin Lembut Renyah",
+            "bahan_utama": "Tempe Kedelai Tahu Tepung Terigu Daun Bawang",
+            "cara_masak": "Goreng Mendoan",
+            "suhu_saji": "Hangat",
+            "deskripsi": "Tempe mendoan lebar digoreng setengah matang berbalut tepung daun bawang gurih disajikan dengan sambal kecap cabai rawit."
+        },
+        {
+            "id": 13,
+            "nama": "Es Teh Manis Pringsewu",
+            "kategori": "Minuman",
+            "harga": 8000,
+            "rasa": "Manis Segar Dingin",
+            "bahan_utama": "Teh Melati Gula Alami Es Batu",
+            "cara_masak": "Seduh Dingin",
+            "suhu_saji": "Dingin",
+            "deskripsi": "Racikan teh melati tradisional aroma wangi dipadukan dengan manis gula murni dan es batu dingin menyegarkan."
+        },
+        {
+            "id": 14,
+            "nama": "Es Jeruk Kelapa Muda",
+            "kategori": "Minuman",
+            "harga": 22000,
+            "rasa": "Manis Asam Segar Alami Dingin",
+            "bahan_utama": "Perasan Jeruk Segar Serutan Kelapa Muda Air Kelapa Es Batu",
+            "cara_masak": "Campur Dingin",
+            "suhu_saji": "Dingin",
+            "deskripsi": "Perpaduan perasan jeruk peras asli manis asam dengan gurih lembutnya serutan kelapa muda dan air kelapa asli."
+        },
+        {
+            "id": 15,
+            "nama": "Jus Alpukat Kocok",
+            "kategori": "Minuman",
+            "harga": 25000,
+            "rasa": "Manis Gurih Lembut Creamy Dingin",
+            "bahan_utama": "Buah Alpukat Mentega Susu Cokelat Kental Manis Es Batu",
+            "cara_masak": "Blender Kocok",
+            "suhu_saji": "Dingin",
+            "deskripsi": "Buah alpukat mentega segar dikocok lembut berpadu lelehan susu kental manis cokelat premium."
+        },
+        {
+            "id": 16,
+            "nama": "Wedang Jahe Rempah",
+            "kategori": "Minuman",
+            "harga": 16000,
+            "rasa": "Pedas Hangat Manis Harum",
+            "bahan_utama": "Jahe Merah Gula Aren Kayu Manis Cengkeh",
+            "cara_masak": "Rebus Seduh",
+            "suhu_saji": "Panas",
+            "deskripsi": "Minuman seduhan jahe merah bakar berpadu gula aren dan rempah alami untuk menghangatkan dan menyegarkan tubuh."
+        }
+    ]
+    df = pd.DataFrame(data)
+    # Gabungkan semua fitur konten menjadi satu teks representasi (Soup Feature)
+    df["content_features"] = (
+        df["kategori"] + " " +
+        df["rasa"] + " " +
+        df["bahan_utama"] + " " +
+        df["cara_masak"] + " " +
+        df["suhu_saji"] + " " +
+        df["deskripsi"]
+    )
+    return df
+
+# -------------------------------------------------------------
+# 2. ALGORITMA CONTENT-BASED FILTERING (TF-IDF & COSINE SIMILARITY)
+# -------------------------------------------------------------
+def tokenize(text):
+    """Membersihkan dan memecah teks menjadi token kata."""
+    text = text.lower()
+    tokens = re.findall(r'\b[a-z]{3,}\b', text)
+    stopwords = {"dan", "yang", "dengan", "khas", "untuk", "dari", "dalam", "disajikan", "adalah"}
+    return [t for t in tokens if t not in stopwords]
 
 @st.cache_data
-def generate_sample_transactions(n=350, seed=42):
-    """Menghasilkan dataset transaksi realistis untuk Restoran Pringsewu."""
-    np.random.seed(seed)
-    transactions = []
+def calculate_cosine_similarity_matrix(df):
+    """Menghitung matriks Cosine Similarity berbasis TF-IDF dari fitur konten menu."""
+    corpus = [tokenize(text) for text in df["content_features"]]
+    vocab = sorted(list(set(word for doc in corpus for word in doc)))
+    n_docs = len(corpus)
     
-    # Pola kebiasaan pelanggan
-    patterns = [
-        ["Ayam Bakar Madu Pringsewu", "Nasi Putih Pulen", "Sayur Asem Jakarta", "Es Teh Manis Pringsewu", "Sambal Terasi Dadak"],
-        ["Gurame Bakar Cobek", "Nasi Putih Pulen", "Tumis Kangkung Terasi", "Es Jeruk Kelapa Muda", "Tahu & Tempe Mendoan"],
-        ["Nasi Timbel Komplit", "Sayur Asem Jakarta", "Tahu & Tempe Mendoan", "Es Teh Manis Pringsewu"],
-        ["Bebek Goreng Sambal Korek", "Nasi Putih Pulen", "Sambal Terasi Dadak", "Es Jeruk Kelapa Muda"],
-        ["Sop Buntut Spesial", "Nasi Putih Pulen", "Tahu & Tempe Mendoan", "Es Teh Manis Pringsewu"],
-        ["Ayam Bakar Madu Pringsewu", "Nasi Timbel Komplit", "Es Jeruk Kelapa Muda", "Jus Alpukat Kocok"]
-    ]
-    
-    all_items = list(MENU_DATABASE.keys())
-    
-    for i in range(1, n + 1):
-        # 75% mengikuti pola umum pelanggan, 25% acak
-        if np.random.rand() < 0.75:
-            base_pattern = patterns[np.random.randint(0, len(patterns))].copy()
-            # Variasi acak (menambah atau mengurangi 1 item)
-            k = np.random.randint(max(2, len(base_pattern)-2), len(base_pattern)+1)
-            selected = list(np.random.choice(base_pattern, size=min(k, len(base_pattern)), replace=False))
-            # 30% peluang menambah menu acak
-            if np.random.rand() < 0.3:
-                extra = np.random.choice(all_items)
-                if extra not in selected:
-                    selected.append(extra)
-        else:
-            size = np.random.randint(2, 6)
-            selected = list(np.random.choice(all_items, size=size, replace=False))
-            
-        transactions.append({
-            "TransactionID": f"TRX-PRING-{1000 + i}",
-            "Items": selected,
-            "Total_Items": len(selected)
-        })
-    return pd.DataFrame(transactions)
+    # 1. Hitung IDF (Inverse Document Frequency)
+    idf = {}
+    for word in vocab:
+        doc_count = sum(1 for doc in corpus if word in doc)
+        idf[word] = math.log((1 + n_docs) / (1 + doc_count)) + 1.0
 
-# -------------------------------------------------------------
-# 2. ALGORITMA REKOMENDASI (ASSOCIATION RULES / APRIORI SIMPLE)
-# -------------------------------------------------------------
-def calculate_rules(df_trans, min_support=0.03, min_confidence=0.15):
-    """Menghitung Association Rules (Support, Confidence, Lift) dari transaksi."""
-    total_trans = len(df_trans)
-    
-    # 1. Hitung frekuensi 1-item
-    item_counts = Counter()
-    for items in df_trans['Items']:
-        for item in items:
-            item_counts[item] += 1
+    # 2. Hitung Matriks Vektor TF-IDF
+    tfidf_matrix = np.zeros((n_docs, len(vocab)))
+    for i, doc in enumerate(corpus):
+        counts = Counter(doc)
+        doc_len = len(doc) if len(doc) > 0 else 1
+        for j, word in enumerate(vocab):
+            tf = counts[word] / doc_len
+            tfidf_matrix[i, j] = tf * idf[word]
             
-    # 2. Hitung frekuensi pasangan (2-itemsets)
-    pair_counts = Counter()
-    for items in df_trans['Items']:
-        unique_items = sorted(list(set(items)))
-        for pair in itertools.combinations(unique_items, 2):
-            pair_counts[pair] += 1
-            
-    # 3. Bentuk Rules: If Antecedent (A) -> Then Consequent (B)
-    rules = []
-    for (item1, item2), count in pair_counts.items():
-        support = count / total_trans
-        if support >= min_support:
-            # Rule 1: item1 -> item2
-            conf1 = count / item_counts[item1]
-            lift1 = conf1 / (item_counts[item2] / total_trans)
-            if conf1 >= min_confidence:
-                rules.append({
-                    'Antecedent': item1,
-                    'Consequent': item2,
-                    'Support': support,
-                    'Confidence': conf1,
-                    'Lift': lift1
-                })
-                
-            # Rule 2: item2 -> item1
-            conf2 = count / item_counts[item2]
-            lift2 = conf2 / (item_counts[item1] / total_trans)
-            if conf2 >= min_confidence:
-                rules.append({
-                    'Antecedent': item2,
-                    'Consequent': item1,
-                    'Support': support,
-                    'Confidence': conf2,
-                    'Lift': lift2
-                })
-                
-    return pd.DataFrame(rules).sort_values(by=['Lift', 'Confidence'], ascending=False)
+        # Normalisasi L2-norm
+        norm = np.linalg.norm(tfidf_matrix[i])
+        if norm > 0:
+            tfidf_matrix[i] = tfidf_matrix[i] / norm
 
-def get_recommendations(selected_items, rules_df, top_k=4):
-    """Memberikan rekomendasi item pendamping berdasarkan item yang sudah dipilih pelanggan."""
-    if not selected_items or rules_df.empty:
-        return pd.DataFrame()
-    
-    matched = rules_df[rules_df['Antecedent'].isin(selected_items)]
-    # Filter item yang belum dipilih
-    recommendations = matched[~matched['Consequent'].isin(selected_items)].copy()
-    
-    if recommendations.empty:
+    # 3. Hitung Cosine Similarity Matrix: S = A . A^T
+    similarity_matrix = np.dot(tfidf_matrix, tfidf_matrix.T)
+    return similarity_matrix, vocab
+
+def get_cbf_recommendations(target_menu_name, df, sim_matrix, top_n=4):
+    """Mengembalikan daftar Top-N menu yang paling mirip berdasarkan Cosine Similarity."""
+    if target_menu_name not in df["nama"].values:
         return pd.DataFrame()
         
-    # Agregasi skor bila direkomendasikan oleh beberapa item
-    agg = recommendations.groupby('Consequent').agg({
-        'Confidence': 'max',
-        'Lift': 'mean',
-        'Support': 'mean',
-        'Antecedent': lambda x: ", ".join(list(x.unique()))
-    }).reset_index()
+    idx = df[df["nama"] == target_menu_name].index[0]
+    sim_scores = list(enumerate(sim_matrix[idx]))
     
-    agg = agg.rename(columns={'Antecedent': 'Direkomendasikan_Karena'})
-    agg = agg.sort_values(by=['Lift', 'Confidence'], ascending=False).head(top_k)
-    return agg
+    # Urutkan berdasarkan skor kemiripan tertinggi (abaikan menu itu sendiri)
+    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+    sim_scores = [item for item in sim_scores if item[0] != idx][:top_n]
+    
+    rec_indices = [item[0] for item in sim_scores]
+    rec_scores = [item[1] for item in sim_scores]
+    
+    rec_df = df.iloc[rec_indices].copy()
+    rec_df["similarity_score"] = rec_scores
+    return rec_df
 
 # -------------------------------------------------------------
-# 3. INTERFACE APLIKASI WEB (STREAMLIT)
+# 3. INTERFACE APLIKASI WEB STREAMLIT
 # -------------------------------------------------------------
-df_trans = generate_sample_transactions()
-rules_df = calculate_rules(df_trans)
+df_menu = get_menu_dataset()
+sim_matrix, vocab = calculate_cosine_similarity_matrix(df_menu)
 
 # Sidebar
 st.sidebar.image("https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=400&q=80", use_container_width=True)
-st.sidebar.markdown("### ⚙️ Pengaturan Rekomendasi")
-min_conf = st.sidebar.slider("Minimum Confidence", 0.1, 0.9, 0.2, step=0.05)
-min_sup = st.sidebar.slider("Minimum Support", 0.01, 0.20, 0.04, step=0.01)
+st.sidebar.markdown("### ⚙️ Parameter Rekomendasi")
+top_k = st.sidebar.slider("Jumlah Rekomendasi (Top-K):", min_value=2, max_value=6, value=4, step=1)
+min_score_filter = st.sidebar.slider("Ambang Batas Minimum Similarity:", min_value=0.05, max_value=0.50, value=0.10, step=0.05)
 
-rules_df_custom = calculate_rules(df_trans, min_support=min_sup, min_confidence=min_conf)
-
-st.sidebar.info(f"📊 Rules Terbentuk: **{len(rules_df_custom)} Aturan**")
 st.sidebar.markdown("---")
 st.sidebar.markdown("""
-**Kelompok PBL:** Sistem POS Restoran (Pringmoni)  
+**Kelompok PBL:** Resto POS & Self-Order (Pringmoni)  
 **Topik:** Sistem Rekomendasi Berbasis Web  
-**Metode:** Association Rule Mining (Market Basket Analysis)
+**Metode:** Content-Based Filtering (CBF)  
+**Algoritma:** TF-IDF & Cosine Similarity  
 """)
 
-# Halaman Utama
-st.markdown('<div class="main-title">🍽️ Pringmoni - Recommender System</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Sistem Rekomendasi Menu Pendamping Pintar Berbasis Riwayat Transaksi Restoran Pringsewu</div>', unsafe_allow_html=True)
+# Judul Utama
+st.markdown('<div class="main-title">🍽️ Pringmoni - Content-Based Recommender System</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Sistem Rekomendasi Menu Serupa Berdasarkan Analisis Kemiripan Konten (Kategori, Rasa, Bahan Baku, dan Cara Masak)</div>', unsafe_allow_html=True)
 
-tabs = st.tabs(["🛒 Simulasi Pemesanan (Self-Order)", "📈 Analisis Aturan Asosiasi (Rules)", "📁 Eksplorasi Riwayat Transaksi"])
+tabs = st.tabs(["🎯 Rekomendasi Menu Serupa", "📊 Matriks Kemiripan (Cosine Similarity)", "📋 Eksplorasi Fitur Konten Menu"])
 
-# TAB 1: SIMULASI SELF-ORDER
+# TAB 1: REKOMENDASI MENU SERUPA
 with tabs[0]:
-    col1, col2 = st.columns([1.1, 1])
+    col1, col2 = st.columns([1, 1.2])
     
     with col1:
-        st.subheader("1. Pilih Menu Pesanan Pelanggan")
-        st.write("Simulasikan pelanggan yang sedang memilih menu di meja restoran via aplikasi Self-Order:")
+        st.subheader("1. Pilih Menu Acuan (Target Item)")
+        st.write("Pilih salah satu menu yang disukai pelanggan atau sedang dilihat pada katalog:")
         
-        all_menu_items = list(MENU_DATABASE.keys())
-        selected_menu = st.multiselect(
-            "Pilih satu atau beberapa menu:",
-            options=all_menu_items,
-            default=["Ayam Bakar Madu Pringsewu", "Nasi Putih Pulen"]
+        target_menu = st.selectbox(
+            "Pilih Menu:",
+            options=df_menu["nama"].tolist(),
+            index=0
         )
         
-        if selected_menu:
-            st.markdown("##### 🧾 Rincian Pesanan Saat Ini:")
-            total_bayar = 0
-            for item in selected_menu:
-                info = MENU_DATABASE.get(item, {"kategori": "-", "harga": 0})
-                total_bayar += info['harga']
-                st.write(f"- **{item}** `({info['kategori']})` — Rp {info['harga']:,}")
-            st.success(f"**Subtotal Sementara:** Rp {total_bayar:,}")
-        else:
-            st.warning("Silakan pilih minimal 1 menu untuk melihat rekomendasi otomatis.")
-
-    with col2:
-        st.subheader("2. 💡 Rekomendasi Menu Pendamping")
-        st.write("Sistem mendeteksi pola pembelian dan merekomendasikan menu yang sering dipesan bersamaan:")
+        target_data = df_menu[df_menu["nama"] == target_menu].iloc[0]
         
-        if selected_menu:
-            recs = get_recommendations(selected_menu, rules_df_custom, top_k=4)
-            if not recs.empty:
-                for idx, row in recs.iterrows():
-                    rec_item = row['Consequent']
-                    info = MENU_DATABASE.get(rec_item, {"kategori": "-", "harga": 0, "deskripsi": ""})
-                    
-                    st.markdown(f"""
-                    <div class="rec-card">
-                        <span class="badge">{info['kategori']}</span>
-                        <h4 style="margin: 8px 0 4px 0; color: #1E40AF;">{rec_item}</h4>
-                        <p style="margin: 0 0 8px 0; color: #4B5563; font-size: 0.9rem;">{info['deskripsi']}</p>
-                        <div style="font-size: 0.85rem; color: #1F2937;">
-                            <b>Harga:</b> Rp {info['harga']:,} | 
-                            <b>Confidence:</b> {row['Confidence']*100:.1f}% | 
-                            <b>Lift Ratio:</b> {row['Lift']:.2f}x
-                        </div>
-                        <div style="font-size: 0.75rem; color: #6B7280; margin-top: 4px;">
-                            <i>(Sering dipesan bersamaan dengan: <b>{row['Direkomendasikan_Karena']}</b>)</i>
-                        </div>
+        st.markdown(f"""
+        <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 16px; margin-top: 10px;">
+            <span class="badge">{target_data['kategori']}</span>
+            <h3 style="margin: 8px 0 4px 0; color: #1E3A8A;">{target_data['nama']}</h3>
+            <p style="color: #475569; font-size: 0.95rem;">{target_data['deskripsi']}</p>
+            <div style="font-size: 0.88rem; line-height: 1.6;">
+                <b>💰 Harga:</b> Rp {target_data['harga']:,}<br>
+                <b>👅 Profil Rasa:</b> {target_data['rasa']}<br>
+                <b>🥩 Bahan Utama:</b> {target_data['bahan_utama']}<br>
+                <b>🔥 Cara Masak:</b> {target_data['cara_masak']}<br>
+                <b>🌡️ Suhu Saji:</b> {target_data['suhu_saji']}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with col2:
+        st.subheader(f"2. 💡 Menu Serupa yang Direkomendasikan")
+        st.write(f"Menu yang memiliki kemiripan karakteristik tertinggi dengan **{target_menu}**:")
+        
+        recs = get_cbf_recommendations(target_menu, df_menu, sim_matrix, top_n=top_k)
+        recs_filtered = recs[recs["similarity_score"] >= min_score_filter]
+        
+        if not recs_filtered.empty:
+            for idx, row in recs_filtered.iterrows():
+                sim_pct = row["similarity_score"] * 100
+                st.markdown(f"""
+                <div class="rec-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span class="badge">{row['kategori']}</span>
+                        <span class="badge-sim">Tingkat Kemiripan: {sim_pct:.1f}%</span>
                     </div>
-                    """, unsafe_allow_html=True)
-            else:
-                st.info("Belum ada aturan rekomendasi yang memenuhi ambang batas saat ini. Coba pilih menu lain atau turunkan ambang batas (threshold) di sidebar.")
+                    <h4 style="margin: 8px 0 4px 0; color: #1E40AF;">{row['nama']}</h4>
+                    <p style="margin: 0 0 8px 0; color: #4B5563; font-size: 0.9rem;">{row['deskripsi']}</p>
+                    <div style="font-size: 0.85rem; color: #1F2937;">
+                        <b>Harga:</b> Rp {row['harga']:,} | 
+                        <b>Rasa:</b> {row['rasa']} | 
+                        <b>Pengolahan:</b> {row['cara_masak']}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
         else:
-            st.info("Pilih menu di samping untuk mengaktifkan mesin rekomendasi.")
+            st.warning("Tidak ada menu yang memenuhi ambang batas kemiripan saat ini. Coba turunkan slider ambang batas di sidebar.")
 
-# TAB 2: ATURAN ASOSIASI (RULES ANALYSIS)
+# TAB 2: MATRIKS KEMIRIPAN (COSINE SIMILARITY)
 with tabs[1]:
-    st.subheader("📊 Association Rules Table (Market Basket Analysis)")
+    st.subheader("📐 Matriks Cosine Similarity Antar-Menu")
     st.markdown("""
-    Aturan dibentuk dengan rumus:
-    - **Support**: Seberapa sering item A dan B dibeli bersamaan dibandingkan seluruh transaksi.
-    - **Confidence**: Peluang pelanggan membeli item B jika mereka telah memilih item A.
-    - **Lift Ratio**: Kekuatan keterikatan asosiasi (> 1.0 mengindikasikan korelasi positif yang signifikan).
+    Matriks ini merepresentasikan derajat kemiripan konten antar semua pasangan menu:
+    - **1.00**: Identik / sangat mirip
+    - **0.00**: Sama sekali tidak memiliki kesamaan karakteristik
     """)
     
-    if not rules_df_custom.empty:
-        display_rules = rules_df_custom.copy()
-        display_rules['Support'] = display_rules['Support'].apply(lambda x: f"{x*100:.1f}%")
-        display_rules['Confidence'] = display_rules['Confidence'].apply(lambda x: f"{x*100:.1f}%")
-        display_rules['Lift'] = display_rules['Lift'].apply(lambda x: f"{x:.2f}")
-        
-        st.dataframe(display_rules.rename(columns={
-            'Antecedent': 'Jika Membeli (A)',
-            'Consequent': 'Maka Disarankan (B)',
-            'Lift': 'Lift Ratio'
-        }), use_container_width=True)
-        
-        # Visualisasi Top Rules
-        st.subheader("📈 Top 10 Hubungan Menu Terkuat (Berdasarkan Nilai Lift)")
-        top_10 = rules_df_custom.head(10).copy()
-        top_10['Rule_Name'] = top_10['Antecedent'] + " ➔ " + top_10['Consequent']
-        chart_data = top_10.set_index('Rule_Name')['Lift']
-        st.bar_chart(chart_data)
-    else:
-        st.warning("Tidak ada aturan yang terbentuk pada parameter saat ini.")
+    sim_df = pd.DataFrame(sim_matrix, index=df_menu["nama"], columns=df_menu["nama"])
+    st.dataframe(sim_df.style.background_gradient(cmap="Blues", axis=None).format("{:.2f}"), use_container_width=True)
+    
+    st.subheader(f"📈 Grafik Tingkat Kemiripan terhadap: {target_menu}")
+    target_idx = df_menu[df_menu["nama"] == target_menu].index[0]
+    chart_series = pd.Series(sim_matrix[target_idx], index=df_menu["nama"]).drop(target_menu).sort_values(ascending=False).head(8)
+    st.bar_chart(chart_series)
 
-# TAB 3: DATASET TRANSAKSI
+# TAB 3: DATASET DAN FITUR KONTEN
 with tabs[2]:
-    st.subheader("📁 Data Riwayat Transaksi Pelanggan (Studi Kasus)")
-    st.write(f"Total Transaksi Terdata: **{len(df_trans)} transaksi**")
+    st.subheader("📋 Dataset Fitur Menu (Item Profile)")
+    st.write("Atribut yang diekstraksi menjadi representasi teks vektor TF-IDF:")
     
-    df_preview = df_trans.copy()
-    df_preview['Items'] = df_preview['Items'].apply(lambda x: ", ".join(x))
-    st.dataframe(df_preview, use_container_width=True)
+    display_df = df_menu[["nama", "kategori", "harga", "rasa", "bahan_utama", "cara_masak", "suhu_saji"]].copy()
+    st.dataframe(display_df, use_container_width=True)
     
-    # Menu Terpopuler
-    st.subheader("🏆 Frekuensi Penjualan Menu Terlaris")
-    flat_items = [item for sublist in df_trans['Items'] for item in sublist]
-    count_df = pd.DataFrame(Counter(flat_items).most_common(10), columns=['Menu', 'Jumlah Dipesan']).set_index('Menu')
-    st.bar_chart(count_df)
+    st.markdown("#### 🔍 Contoh Ekstraksi Kata Kunci Fitur (Tokens Vocabulary)")
+    st.write(f"Total vocabulary unik terdeteksi: **{len(vocab)} kata unik**")
+    st.write(", ".join([f"`{w}`" for w in vocab[:30]]) + ", ...")
 
 # Footer
 st.markdown("---")
-st.markdown("<p style='text-align: center; color: #9CA3AF;'>Pringmoni Recommendation Engine © 2026 - Proyek PBL TRPL</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #9CA3AF;'>Pringmoni Content-Based Recommender System © 2026 - TRPL PBL</p>", unsafe_allow_html=True)
